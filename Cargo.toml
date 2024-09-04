@@ -1,0 +1,7 @@
+[workspace]
+members = ["bwa", "bwa-sys"]
+resolver = "2"
+default-members = ["bwa", "bwa-sys"]
+
+[workspace.dependencies]
+bwa-sys = { version = "0.1", path = "bwa-sys" }

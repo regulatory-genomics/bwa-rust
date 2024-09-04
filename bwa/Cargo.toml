@@ -1,0 +1,11 @@
+[package]
+name = "bwa"
+version = "0.1.0"
+edition = "2021"
+authors = ["Kai Zhang <zhangkai33@westlake.edu.cn>"]
+license = "MIT"
+
+[dependencies]
+libc = "*"
+bwa-sys = { version = "0.1", workspace = true }
+noodles = { version = "0.79", features = ["core", "bam", "sam"] }
