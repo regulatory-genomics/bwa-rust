@@ -256,29 +256,6 @@ const _: () = {
     ["Offset of field: bwaidx_t::l_mem"][::std::mem::offset_of!(bwaidx_t, l_mem) - 32usize];
     ["Offset of field: bwaidx_t::mem"][::std::mem::offset_of!(bwaidx_t, mem) - 40usize];
 };
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct bseq1_t {
-    pub l_seq: ::std::os::raw::c_int,
-    pub id: ::std::os::raw::c_int,
-    pub name: *mut ::std::os::raw::c_char,
-    pub comment: *mut ::std::os::raw::c_char,
-    pub seq: *mut ::std::os::raw::c_char,
-    pub qual: *mut ::std::os::raw::c_char,
-    pub sam: *mut ::std::os::raw::c_char,
-}
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of bseq1_t"][::std::mem::size_of::<bseq1_t>() - 48usize];
-    ["Alignment of bseq1_t"][::std::mem::align_of::<bseq1_t>() - 8usize];
-    ["Offset of field: bseq1_t::l_seq"][::std::mem::offset_of!(bseq1_t, l_seq) - 0usize];
-    ["Offset of field: bseq1_t::id"][::std::mem::offset_of!(bseq1_t, id) - 4usize];
-    ["Offset of field: bseq1_t::name"][::std::mem::offset_of!(bseq1_t, name) - 8usize];
-    ["Offset of field: bseq1_t::comment"][::std::mem::offset_of!(bseq1_t, comment) - 16usize];
-    ["Offset of field: bseq1_t::seq"][::std::mem::offset_of!(bseq1_t, seq) - 24usize];
-    ["Offset of field: bseq1_t::qual"][::std::mem::offset_of!(bseq1_t, qual) - 32usize];
-    ["Offset of field: bseq1_t::sam"][::std::mem::offset_of!(bseq1_t, sam) - 40usize];
-};
 extern "C" {
     pub fn bwa_fill_scmat(a: ::std::os::raw::c_int, b: ::std::os::raw::c_int, mat: *mut i8);
 }
@@ -443,9 +420,11 @@ extern "C" {
 }
 extern "C" {
     pub fn mem_align(
+        opt: *const mem_opt_t,
         idx: *const bwaidx_t,
         seq_name: *const ::std::os::raw::c_char,
         seq_seq: *const ::std::os::raw::c_char,
         seq_qual: *const ::std::os::raw::c_char,
+        l_seq: ::std::os::raw::c_int,
     ) -> *mut ::std::os::raw::c_char;
 }

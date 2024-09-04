@@ -7,5 +7,10 @@ license = "MIT"
 
 [dependencies]
 libc = "*"
+bstr = "1.0"
 bwa-sys = { version = "0.1", workspace = true }
 noodles = { version = "0.79", features = ["core", "bam", "sam"] }
+
+[dev-dependencies]
+noodles-fastq = "0.14"
+flate2 = "1.0"

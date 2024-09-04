@@ -1,5 +1,7 @@
 use std::{ffi::{CStr, CString}, path::Path};
-use noodles::sam;
+use noodles::sam::{self, header::record::value::map::ReferenceSequence};
+use noodles::sam::header::record::value::Map;
+use bstr;
 
 #[derive(Debug)]
 pub struct IndexError(String);
@@ -51,6 +53,13 @@ impl FMIndex {
         }
 
         Ok(Self { fm_index: idx, contig_names, contig_lengths })
+    }
+
+    pub fn create_sam_header(&self) -> sam::Header {
+        let ref_seqs = self.contig_names.iter().zip(self.contig_lengths.iter()).map(|(name, len)|
+            (bstr::BString::from(name.as_str()), Map::<ReferenceSequence>::new(std::num::NonZeroUsize::try_from(*len).unwrap()))
+        ).collect();
+        sam::Header::builder().set_reference_sequences(ref_seqs).build()
     }
 }
 
@@ -168,6 +177,7 @@ impl PairedEndStats {
 pub struct BurrowsWheelerAligner {
     index: FMIndex,
     settings: AlignerSettings,
+    header: sam::Header,
     pe_stats: PairedEndStats,
 }
 
@@ -177,18 +187,23 @@ impl BurrowsWheelerAligner {
         settings: AlignerSettings,
         pe_stats: PairedEndStats,
     ) -> Self {
-        Self {
-            index,
-            settings,
-            pe_stats,
-        }
+        let header = index.create_sam_header();
+        Self { index, settings, header, pe_stats }
     }
 
     /// Align a read-pair to the reference.
     pub fn align_read(&self, name: &[u8], seq: &[u8], qual: &[u8]) -> sam::Record
     {
+        let raw_name = CString::new(name).unwrap().into_raw();
         unsafe {
-            let sam_ptr = bwa_sys::mem_align(self.index.fm_index, name.as_ptr() as *mut i8, seq.as_ptr() as *mut i8, qual.as_ptr() as *mut i8);
+            let sam_ptr = bwa_sys::mem_align(
+                &self.settings.settings,
+                self.index.fm_index, 
+                raw_name,
+                seq.as_ptr() as *mut i8,
+                qual.as_ptr() as *mut i8,
+                seq.len() as i32,
+            );
             let sam = CStr::from_ptr(sam_ptr).to_str().unwrap().as_bytes().try_into().unwrap();
             libc::free(sam_ptr as *mut libc::c_void);
             sam
@@ -199,8 +214,10 @@ impl BurrowsWheelerAligner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
+    use std::{fs, io::BufReader};
     use noodles::sam;
+    use noodles_fastq;
+    use flate2;
 
     #[test]
     fn test_index() {
@@ -224,5 +241,22 @@ mod tests {
         //let mut writer = sam::io::Writer::new(Vec::new());
         let sam = aligner.align_read(&data[0].0, &data[0].1, &data[0].2);
         println!("{:?}", sam);
+    }
+
+    #[test]
+    fn test_align() {
+        let fasta = "tests/data/ecoli.fa.gz";
+        let location = "tests/temp";
+        let _ = fs::remove_dir_all(location);
+        let idx = FMIndex::new(fasta, location).unwrap();
+        let aligner = BurrowsWheelerAligner::new(idx, AlignerSettings::default(), PairedEndStats::default());
+
+        let mut writer = sam::io::Writer::new(std::fs::File::create("out.sam").unwrap());
+        let reader = flate2::read::MultiGzDecoder::new(std::fs::File::open("tests/test.fq.gz").unwrap());
+        for record in noodles_fastq::Reader::new(BufReader::new(reader)).records() {
+            let record = record.unwrap();
+            let sam = aligner.align_read(record.name(), record.sequence(), record.quality_scores());
+            writer.write_record(&aligner.header, &sam).unwrap();
+        }
     }
 }
