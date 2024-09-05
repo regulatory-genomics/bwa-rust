@@ -17,7 +17,6 @@ const FILES: &[&str] = &[
     "ext/bwa/bwamem_extra.c",
     "ext/bwa/malloc_wrap.c",
     "ext/bwa/bwt_gen.c",
-    "wrapper.c",
 ];
 
 fn main() {

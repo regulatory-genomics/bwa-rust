@@ -1,4 +1,4 @@
-bindgen bwa-sys/wrapper.c -o bindings.rs \
+bindgen ext/bwa/bwamem.c -o bindings.rs \
     --allowlist-function "bwa_idx_build" \
     --allowlist-function "bwa_idx_load" \
     --allowlist-item bwaidx_t \
@@ -7,10 +7,7 @@ bindgen bwa-sys/wrapper.c -o bindings.rs \
     --allowlist-item mem_opt_t \
     --allowlist-item mem_opt_init \
     --allowlist-item bwa_fill_scmat \
-    --allowlist-item mem_align \
-    --allowlist-item smem_aux_t \
-    --allowlist-item bwa_smem_aux_init \
-    --allowlist-item bwa_smem_aux_destroy \
+    --allowlist-item mem_process_seqs \
     --allowlist-item BWA_IDX_ALL \
     --allowlist-item BWTALGO_BWTSW \
     --allowlist-item BWTALGO_IS \
