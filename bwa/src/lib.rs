@@ -1,5 +1,5 @@
 use std::{ffi::{CStr, CString}, path::Path};
-use noodles::sam::{self, header::record::value::map::ReferenceSequence};
+use noodles::{bam::record, sam::{self, header::record::value::map::ReferenceSequence}};
 use noodles::sam::header::record::value::Map;
 use noodles::fastq;
 use bstr;
@@ -192,6 +192,7 @@ pub struct BurrowsWheelerAligner {
     settings: AlignerOpts,
     header: sam::Header,
     pe_stats: PairedEndStats,
+    n_processed: usize,
 }
 
 impl BurrowsWheelerAligner {
@@ -201,15 +202,23 @@ impl BurrowsWheelerAligner {
         pe_stats: PairedEndStats,
     ) -> Self {
         let header = index.create_sam_header();
-        Self { index, settings, header, pe_stats }
+        Self { index, settings, header, pe_stats, n_processed: 0 }
     }
 
-    pub fn align_reads<'a, I>(&'a self, mut records: I) -> impl Iterator<Item = sam::Record> + '_
+    pub fn get_sam_header(&self) -> sam::Header {
+        self.header.clone()
+    }
+
+    /// Return the chunk size (in terms of number of bases) used by the aligner
+    pub fn chunk_size(&self) -> usize {
+        self.settings.get_actual_chunk_size()
+    }
+
+    pub fn align_reads_iter<'a, I>(&'a mut self, mut records: I) -> impl Iterator<Item = sam::Record> + '_
     where
         I: Iterator<Item = fastq::Record> + 'a,
     {
         let max_chunk_length = self.settings.get_actual_chunk_size();
-        let mut n_processed = 0;
         std::iter::from_fn(move || {
             let mut chunk: Vec<_> = Vec::new();
             let mut accumulated_length = 0;
@@ -226,20 +235,17 @@ impl BurrowsWheelerAligner {
             if chunk.is_empty() {
                 None
             } else {
-                let sams = self.align_reads_batch(&self.settings, chunk.as_mut(), n_processed);
-                n_processed += sams.len();
+                let sams = self.align_reads(chunk.as_mut());
                 Some(sams.into_iter())
             }
         }).flatten()
     }
 
-    pub fn align_read_pairs<'a, I>(&'a self, mut records: I) -> impl Iterator<Item = (sam::Record, sam::Record)> + '_
+    pub fn align_read_pairs_iter<'a, I>(&'a mut self, mut records: I) -> impl Iterator<Item = (sam::Record, sam::Record)> + '_
     where
         I: Iterator<Item = (fastq::Record, fastq::Record)> + 'a
     {
-        let opt = self.settings.clone().pe_mode();
         let max_chunk_length = self.settings.get_actual_chunk_size();
-        let mut n_processed = 0;
 
         std::iter::from_fn(move || {
             let mut chunk: Vec<_> = Vec::new();
@@ -258,30 +264,51 @@ impl BurrowsWheelerAligner {
             if chunk.is_empty() {
                 None
             } else {
-                let sams = self.align_reads_batch(&opt, chunk.as_mut(), n_processed);
-                n_processed += sams.len();
+                let sams = self.align_reads( chunk.as_mut());
                 Some(sams.into_iter())
             }
         }).flatten().tuples()
     }
 
-    fn align_reads_batch(
-        &self,
-        opt: &AlignerOpts,
-        records: &mut [fastq::Record],
-        n_processed: usize
-    ) -> impl ExactSizeIterator<Item = sam::Record> {
-        let mut seqs: Vec<_> = records.iter_mut().enumerate().map(|(i, fq)| new_bseq1_t(i, fq)).collect();
-        unsafe {
+    pub fn align_read_pairs(
+        &mut self,
+        records: &mut [(fastq::Record, fastq::Record)],
+    ) -> impl ExactSizeIterator<Item = (sam::Record, sam::Record)> {
+        let mut seqs = records.iter_mut().enumerate().flat_map(|(i, (fq1, fq2))|
+            [new_bseq1_t(i, fq1), new_bseq1_t(i+1, fq2)]
+        ).collect::<Vec<_>>();
+        let sam = unsafe {
             let index = *self.index.fm_index;
             bwa_sys::mem_process_seqs(
-                &opt.settings, index.bwt, index.bns, index.pac,
-                n_processed.try_into().unwrap(),
+                &self.settings.clone().pe_mode().settings, index.bwt, index.bns, index.pac,
+                self.n_processed.try_into().unwrap(),
                 seqs.len().try_into().unwrap(),
                 seqs.as_mut_ptr(), self.pe_stats.inner.as_ptr(),
             );
             seqs.into_iter().map(|seq| CStr::from_ptr(seq.sam).to_str().unwrap().as_bytes().try_into().unwrap())
-        }
+                .tuples()
+        };
+        self.n_processed += records.len() * 2;
+        sam
+    }
+
+    pub fn align_reads(
+        &mut self,
+        records: &mut [fastq::Record],
+    ) -> impl ExactSizeIterator<Item = sam::Record> {
+        let mut seqs: Vec<_> = records.iter_mut().enumerate().map(|(i, fq)| new_bseq1_t(i, fq)).collect();
+        let sam = unsafe {
+            let index = *self.index.fm_index;
+            bwa_sys::mem_process_seqs(
+                &self.settings.settings, index.bwt, index.bns, index.pac,
+                self.n_processed.try_into().unwrap(),
+                seqs.len().try_into().unwrap(),
+                seqs.as_mut_ptr(), self.pe_stats.inner.as_ptr(),
+            );
+            seqs.into_iter().map(|seq| CStr::from_ptr(seq.sam).to_str().unwrap().as_bytes().try_into().unwrap())
+        };
+        self.n_processed += records.len();
+        sam
     }
 }
 
@@ -312,13 +339,14 @@ mod tests {
         let _ = fs::remove_dir_all(location);
         let idx = FMIndex::new(fasta, location).unwrap();
         let opt = AlignerOpts::default();
-        let aligner = BurrowsWheelerAligner::new(idx, opt, PairedEndStats::default());
+        let mut aligner = BurrowsWheelerAligner::new(idx, opt, PairedEndStats::default());
+        let header = aligner.get_sam_header();
 
         let mut writer = sam::io::Writer::new(std::fs::File::create("out.sam").unwrap());
         let reader = flate2::read::MultiGzDecoder::new(std::fs::File::open("tests/test.fq.gz").unwrap());
         let mut reader = fastq::Reader::new(BufReader::new(reader));
-        aligner.align_reads(reader.records().map(|x| x.unwrap())).for_each(|sam| {
-            writer.write_record(&aligner.header, &sam).unwrap();
+        aligner.align_reads_iter(reader.records().map(|x| x.unwrap())).for_each(|sam| {
+            writer.write_record(&header, &sam).unwrap();
         });
     }
 
@@ -329,14 +357,15 @@ mod tests {
         let _ = fs::remove_dir_all(location);
         let idx = FMIndex::new(fasta, location).unwrap();
         let opt = AlignerOpts::default();
-        let aligner = BurrowsWheelerAligner::new(idx, opt, PairedEndStats::default());
+        let mut aligner = BurrowsWheelerAligner::new(idx, opt, PairedEndStats::default());
+        let header = aligner.get_sam_header();
 
         let mut writer = sam::io::Writer::new(std::fs::File::create("out.sam").unwrap());
         let reader = flate2::read::MultiGzDecoder::new(std::fs::File::open("tests/test.fq.gz").unwrap());
         let mut reader = fastq::Reader::new(BufReader::new(reader));
-        aligner.align_read_pairs(reader.records().map(|x| x.unwrap()).tuples()).for_each(|(sam1, sam2)| {
-            writer.write_record(&aligner.header, &sam1).unwrap();
-            writer.write_record(&aligner.header, &sam2).unwrap();
+        aligner.align_read_pairs_iter(reader.records().map(|x| x.unwrap()).tuples()).for_each(|(sam1, sam2)| {
+            writer.write_record(&header, &sam1).unwrap();
+            writer.write_record(&header, &sam2).unwrap();
         });
     }
 }
