@@ -1,5 +1,5 @@
 use std::{ffi::{CStr, CString}, path::Path};
-use noodles::{bam::record, sam::{self, header::record::value::map::ReferenceSequence}};
+use noodles::sam::{self, header::record::value::map::ReferenceSequence};
 use noodles::sam::header::record::value::Map;
 use noodles::fastq;
 use bstr;
@@ -192,7 +192,6 @@ pub struct BurrowsWheelerAligner {
     settings: AlignerOpts,
     header: sam::Header,
     pe_stats: PairedEndStats,
-    n_processed: usize,
 }
 
 impl BurrowsWheelerAligner {
@@ -202,7 +201,7 @@ impl BurrowsWheelerAligner {
         pe_stats: PairedEndStats,
     ) -> Self {
         let header = index.create_sam_header();
-        Self { index, settings, header, pe_stats, n_processed: 0 }
+        Self { index, settings, header, pe_stats }
     }
 
     pub fn get_sam_header(&self) -> sam::Header {
@@ -214,7 +213,7 @@ impl BurrowsWheelerAligner {
         self.settings.get_actual_chunk_size()
     }
 
-    pub fn align_reads_iter<'a, I>(&'a mut self, mut records: I) -> impl Iterator<Item = sam::Record> + '_
+    pub fn align_reads_iter<'a, I>(&'a self, mut records: I) -> impl Iterator<Item = sam::Record> + '_
     where
         I: Iterator<Item = fastq::Record> + 'a,
     {
@@ -241,7 +240,7 @@ impl BurrowsWheelerAligner {
         }).flatten()
     }
 
-    pub fn align_read_pairs_iter<'a, I>(&'a mut self, mut records: I) -> impl Iterator<Item = (sam::Record, sam::Record)> + '_
+    pub fn align_read_pairs_iter<'a, I>(&'a self, mut records: I) -> impl Iterator<Item = (sam::Record, sam::Record)> + '_
     where
         I: Iterator<Item = (fastq::Record, fastq::Record)> + 'a
     {
@@ -271,7 +270,7 @@ impl BurrowsWheelerAligner {
     }
 
     pub fn align_read_pairs(
-        &mut self,
+        &self,
         records: &mut [(fastq::Record, fastq::Record)],
     ) -> impl ExactSizeIterator<Item = (sam::Record, sam::Record)> {
         let mut seqs = records.iter_mut().enumerate().flat_map(|(i, (fq1, fq2))|
@@ -281,19 +280,18 @@ impl BurrowsWheelerAligner {
             let index = *self.index.fm_index;
             bwa_sys::mem_process_seqs(
                 &self.settings.clone().pe_mode().settings, index.bwt, index.bns, index.pac,
-                self.n_processed.try_into().unwrap(),
+                0,
                 seqs.len().try_into().unwrap(),
                 seqs.as_mut_ptr(), self.pe_stats.inner.as_ptr(),
             );
             seqs.into_iter().map(|seq| CStr::from_ptr(seq.sam).to_str().unwrap().as_bytes().try_into().unwrap())
                 .tuples()
         };
-        self.n_processed += records.len() * 2;
         sam
     }
 
     pub fn align_reads(
-        &mut self,
+        &self,
         records: &mut [fastq::Record],
     ) -> impl ExactSizeIterator<Item = sam::Record> {
         let mut seqs: Vec<_> = records.iter_mut().enumerate().map(|(i, fq)| new_bseq1_t(i, fq)).collect();
@@ -301,13 +299,12 @@ impl BurrowsWheelerAligner {
             let index = *self.index.fm_index;
             bwa_sys::mem_process_seqs(
                 &self.settings.settings, index.bwt, index.bns, index.pac,
-                self.n_processed.try_into().unwrap(),
+                0,
                 seqs.len().try_into().unwrap(),
                 seqs.as_mut_ptr(), self.pe_stats.inner.as_ptr(),
             );
             seqs.into_iter().map(|seq| CStr::from_ptr(seq.sam).to_str().unwrap().as_bytes().try_into().unwrap())
         };
-        self.n_processed += records.len();
         sam
     }
 }
@@ -339,7 +336,7 @@ mod tests {
         let _ = fs::remove_dir_all(location);
         let idx = FMIndex::new(fasta, location).unwrap();
         let opt = AlignerOpts::default();
-        let mut aligner = BurrowsWheelerAligner::new(idx, opt, PairedEndStats::default());
+        let aligner = BurrowsWheelerAligner::new(idx, opt, PairedEndStats::default());
         let header = aligner.get_sam_header();
 
         let mut writer = sam::io::Writer::new(std::fs::File::create("out.sam").unwrap());
@@ -357,7 +354,7 @@ mod tests {
         let _ = fs::remove_dir_all(location);
         let idx = FMIndex::new(fasta, location).unwrap();
         let opt = AlignerOpts::default();
-        let mut aligner = BurrowsWheelerAligner::new(idx, opt, PairedEndStats::default());
+        let aligner = BurrowsWheelerAligner::new(idx, opt, PairedEndStats::default());
         let header = aligner.get_sam_header();
 
         let mut writer = sam::io::Writer::new(std::fs::File::create("out.sam").unwrap());
