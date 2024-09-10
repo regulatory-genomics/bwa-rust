@@ -74,10 +74,10 @@ impl Drop for FMIndex {
     }
 }
 
-/// BWA settings object. Currently only default settings are enabled
+/// BWA opts object. Currently only default opts are enabled
 #[derive(Debug, Copy, Clone)]
 pub struct AlignerOpts {
-    settings: bwa_sys::mem_opt_t,
+    opts: bwa_sys::mem_opt_t,
 }
 
 impl Default for AlignerOpts {
@@ -87,16 +87,21 @@ impl Default for AlignerOpts {
 }
 
 impl AlignerOpts {
-    /// Create a `BwaSettings` object with default BWA parameters
+    /// Create a `Bwaopts` object with default BWA parameters
     pub fn new() -> Self {
         let ptr = unsafe { bwa_sys::mem_opt_init() };
-        let settings = unsafe { *ptr };
+        let opts = unsafe { *ptr };
         unsafe { libc::free(ptr as *mut libc::c_void) };
-        Self { settings }
+        Self { opts }
     }
 
     pub fn get_actual_chunk_size(&self) -> usize {
-        (self.settings.chunk_size * self.settings.n_threads).try_into().unwrap()
+        (self.opts.chunk_size * self.opts.n_threads).try_into().unwrap()
+    }
+
+    pub fn set_n_threads(mut self, n_threads: usize) -> Self {
+        self.opts.n_threads = n_threads as i32;
+        self
     }
 
     /// Set alignment scores
@@ -107,40 +112,40 @@ impl AlignerOpts {
         gap_open: i32,
         gap_extend: i32,
     ) -> Self {
-        self.settings.a = matchp;
-        self.settings.b = mismatch;
-        self.settings.o_del = gap_open;
-        self.settings.o_ins = gap_open;
-        self.settings.e_del = gap_extend;
-        self.settings.e_ins = gap_extend;
+        self.opts.a = matchp;
+        self.opts.b = mismatch;
+        self.opts.o_del = gap_open;
+        self.opts.o_ins = gap_open;
+        self.opts.e_del = gap_extend;
+        self.opts.e_ins = gap_extend;
 
         unsafe {
-            bwa_sys::bwa_fill_scmat(matchp, mismatch, self.settings.mat.as_mut_ptr());
+            bwa_sys::bwa_fill_scmat(matchp, mismatch, self.opts.mat.as_mut_ptr());
         }
         self
     }
 
     /// Set clipping score penalties
     pub fn set_clip_scores(mut self, clip5: i32, clip3: i32) -> Self {
-        self.settings.pen_clip5 = clip5;
-        self.settings.pen_clip3 = clip3;
+        self.opts.pen_clip5 = clip5;
+        self.opts.pen_clip3 = clip3;
         self
     }
 
     /// Set unpaired read penalty
     pub fn set_unpaired(mut self, unpaired: i32) -> Self {
-        self.settings.pen_unpaired = unpaired;
+        self.opts.pen_unpaired = unpaired;
         self
     }
 
     /// Mark shorter splits as secondary
     pub fn set_no_multi(mut self) -> Self {
-        self.settings.flag |= bwa_sys::MEM_F_NO_MULTI as i32;
+        self.opts.flag |= bwa_sys::MEM_F_NO_MULTI as i32;
         self
     }
 
     fn pe_mode(mut self) -> Self {
-        self.settings.flag |= bwa_sys::MEM_F_PE as i32;
+        self.opts.flag |= bwa_sys::MEM_F_PE as i32;
         self
     }
 }
@@ -189,7 +194,7 @@ impl PairedEndStats {
 /// reads to a reference and generate BAM records.
 pub struct BurrowsWheelerAligner {
     index: FMIndex,
-    settings: AlignerOpts,
+    opts: AlignerOpts,
     header: sam::Header,
     pe_stats: PairedEndStats,
 }
@@ -197,11 +202,11 @@ pub struct BurrowsWheelerAligner {
 impl BurrowsWheelerAligner {
     pub fn new(
         index: FMIndex,
-        settings: AlignerOpts,
+        opts: AlignerOpts,
         pe_stats: PairedEndStats,
     ) -> Self {
         let header = index.create_sam_header();
-        Self { index, settings, header, pe_stats }
+        Self { index, opts, header, pe_stats }
     }
 
     pub fn get_sam_header(&self) -> sam::Header {
@@ -210,14 +215,14 @@ impl BurrowsWheelerAligner {
 
     /// Return the chunk size (in terms of number of bases) used by the aligner
     pub fn chunk_size(&self) -> usize {
-        self.settings.get_actual_chunk_size()
+        self.opts.get_actual_chunk_size()
     }
 
     pub fn align_reads_iter<'a, I>(&'a self, mut records: I) -> impl Iterator<Item = sam::Record> + '_
     where
         I: Iterator<Item = fastq::Record> + 'a,
     {
-        let max_chunk_length = self.settings.get_actual_chunk_size();
+        let max_chunk_length = self.opts.get_actual_chunk_size();
         std::iter::from_fn(move || {
             let mut chunk: Vec<_> = Vec::new();
             let mut accumulated_length = 0;
@@ -244,7 +249,7 @@ impl BurrowsWheelerAligner {
     where
         I: Iterator<Item = (fastq::Record, fastq::Record)> + 'a
     {
-        let max_chunk_length = self.settings.get_actual_chunk_size();
+        let max_chunk_length = self.opts.get_actual_chunk_size();
 
         std::iter::from_fn(move || {
             let mut chunk: Vec<_> = Vec::new();
@@ -279,7 +284,7 @@ impl BurrowsWheelerAligner {
         let sam = unsafe {
             let index = *self.index.fm_index;
             bwa_sys::mem_process_seqs(
-                &self.settings.clone().pe_mode().settings, index.bwt, index.bns, index.pac,
+                &self.opts.clone().pe_mode().opts, index.bwt, index.bns, index.pac,
                 0,
                 seqs.len().try_into().unwrap(),
                 seqs.as_mut_ptr(), self.pe_stats.inner.as_ptr(),
@@ -298,7 +303,7 @@ impl BurrowsWheelerAligner {
         let sam = unsafe {
             let index = *self.index.fm_index;
             bwa_sys::mem_process_seqs(
-                &self.settings.settings, index.bwt, index.bns, index.pac,
+                &self.opts.opts, index.bwt, index.bns, index.pac,
                 0,
                 seqs.len().try_into().unwrap(),
                 seqs.as_mut_ptr(), self.pe_stats.inner.as_ptr(),
