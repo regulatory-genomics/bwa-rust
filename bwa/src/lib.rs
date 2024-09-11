@@ -289,8 +289,11 @@ impl BurrowsWheelerAligner {
                 seqs.len().try_into().unwrap(),
                 seqs.as_mut_ptr(), self.pe_stats.inner.as_ptr(),
             );
-            seqs.into_iter().map(|seq| CStr::from_ptr(seq.sam).to_str().unwrap().as_bytes().try_into().unwrap())
-                .tuples()
+            seqs.into_iter().map(|seq| {
+                let sam = CStr::from_ptr(seq.sam).to_str().unwrap().as_bytes().try_into().unwrap();
+                libc::free(seq.sam as *mut libc::c_void);
+                sam
+            }).tuples()
         };
         sam
     }
@@ -308,7 +311,11 @@ impl BurrowsWheelerAligner {
                 seqs.len().try_into().unwrap(),
                 seqs.as_mut_ptr(), self.pe_stats.inner.as_ptr(),
             );
-            seqs.into_iter().map(|seq| CStr::from_ptr(seq.sam).to_str().unwrap().as_bytes().try_into().unwrap())
+            seqs.into_iter().map(|seq| {
+                let sam = CStr::from_ptr(seq.sam).to_str().unwrap().as_bytes().try_into().unwrap();
+                libc::free(seq.sam as *mut libc::c_void);
+                sam
+            })
         };
         sam
     }
