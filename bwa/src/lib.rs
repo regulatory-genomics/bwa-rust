@@ -278,6 +278,7 @@ impl BurrowsWheelerAligner {
         &self,
         records: &mut [(fastq::Record, fastq::Record)],
     ) -> impl ExactSizeIterator<Item = (sam::Record, sam::Record)> {
+        unsafe { bwa_sys::bwa_verbose = 0; }
         let mut seqs = records.iter_mut().enumerate().flat_map(|(i, (fq1, fq2))|
             [new_bseq1_t(i, fq1), new_bseq1_t(i+1, fq2)]
         ).collect::<Vec<_>>();
@@ -302,6 +303,7 @@ impl BurrowsWheelerAligner {
         &self,
         records: &mut [fastq::Record],
     ) -> impl ExactSizeIterator<Item = sam::Record> {
+        unsafe { bwa_sys::bwa_verbose = 0; }
         let mut seqs: Vec<_> = records.iter_mut().enumerate().map(|(i, fq)| new_bseq1_t(i, fq)).collect();
         let sam = unsafe {
             let index = *self.index.fm_index;

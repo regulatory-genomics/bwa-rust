@@ -22,3 +22,4 @@ bindgen ext/bwa/bwamem.c -o bindings.rs \
     --allowlist-item MEM_F_PRIMARY5  \
     --allowlist-item MEM_F_KEEP_SUPP_MAPQ \
     --allowlist-item MEM_F_XB        \
+    --allowlist-item bwa_verbose \

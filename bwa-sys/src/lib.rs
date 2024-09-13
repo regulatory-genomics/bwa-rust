@@ -252,6 +252,9 @@ const _: () = {
     ["Offset of field: bseq1_t::sam"][::std::mem::offset_of!(bseq1_t, sam) - 40usize];
 };
 extern "C" {
+    pub static mut bwa_verbose: ::std::os::raw::c_int;
+}
+extern "C" {
     pub fn bwa_fill_scmat(a: ::std::os::raw::c_int, b: ::std::os::raw::c_int, mat: *mut i8);
 }
 extern "C" {
